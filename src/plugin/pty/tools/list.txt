@@ -17,6 +17,6 @@ Returns for each session:
 - `createdAt`: When the session was created
 
 Tips:
-- Use the session ID with pty_read, pty_write, or pty_kill
+- Use the session ID with pty_read, pty_write, pty_nudge, or pty_kill
 - Sessions remain in the list after exit until explicitly cleaned up with pty_kill
 - This allows you to compare output from multiple sessions

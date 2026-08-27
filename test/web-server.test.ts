@@ -102,6 +102,23 @@ describe('Web Server', () => {
       expect(Array.isArray(sessions)).toBe(true)
     })
 
+    it('should disable agent nudges for sessions created through the web API', async () => {
+      const response = await fetch(`${managedTestServer.server.server.url}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command: 'sleep',
+          args: ['60'],
+          description: 'Web API nudge isolation',
+        }),
+      })
+
+      expect(response.status).toBe(200)
+      const session = (await response.json()) as PTYSessionInfo
+      expect(session.nudgeEnabled).toBe(false)
+      manager.kill(session.id, true)
+    })
+
     it('should return individual session', async () => {
       // Create a test session first
       const session = manager.spawn({

@@ -1,6 +1,7 @@
 import { tool } from '@opencode-ai/plugin'
 import { manager } from '../manager.ts'
 import { checkCommandPermission, checkWorkdirPermission } from '../permissions.ts'
+import { formatNudgeSummary } from '../formatters.ts'
 import DESCRIPTION from './spawn.txt'
 
 const NOTIFY_ON_EXIT_INSTRUCTIONS = [
@@ -9,6 +10,14 @@ const NOTIFY_ON_EXIT_INSTRUCTIONS = [
   `If you only need to know whether the command finished, do not call \`pty_read\`; wait for \`<pty_exited>\`.`,
   `Never use sleep plus \`pty_read\` loops to check completion for this session.`,
   `Call \`pty_read\` before exit only if you need live output now, the user explicitly asks for logs, or the exit notification reports a non-zero status and you need to investigate.`,
+  `</system_reminder>`,
+].join('\n')
+
+const NUDGE_INSTRUCTIONS = [
+  `<system_reminder>`,
+  `Future \`<pty_nudge>\` messages mean this PTY is still running; they are not completion signals.`,
+  `Use your judgment to inspect it with \`pty_read\`, manage future check-ins with \`pty_nudge\`, leave it running, or stop it.`,
+  `Avoid sleep-and-\`pty_read\` polling loops; nudges can be used for future check-ins instead.`,
   `</system_reminder>`,
 ].join('\n')
 
@@ -38,6 +47,12 @@ export const ptySpawn = tool({
       .describe(
         'Optional per-session timeout in seconds. The PTY is killed automatically when this duration elapses.'
       ),
+    nudgeIntervalSeconds: tool.schema
+      .number()
+      .optional()
+      .describe(
+        'Optional initial recurring nudge cadence in seconds. Omit for automatic cadence: 30s, 1m, 2m, 4m, 8m, 15m, then every 30m.'
+      ),
   },
   async execute(args, ctx) {
     await checkCommandPermission(args.command, args.args ?? [])
@@ -58,6 +73,7 @@ export const ptySpawn = tool({
       parentAgent: ctx.agent,
       notifyOnExit: args.notifyOnExit,
       timeoutSeconds: args.timeoutSeconds,
+      nudgeIntervalSeconds: args.nudgeIntervalSeconds,
     })
 
     const output = [
@@ -70,8 +86,10 @@ export const ptySpawn = tool({
       `Status: ${info.status}`,
       `NotifyOnExit: ${info.notifyOnExit}`,
       `TimeoutSeconds: ${info.timeoutSeconds ?? 'none'}`,
+      formatNudgeSummary(info),
       `</pty_spawned>`,
       ...(info.notifyOnExit ? ['', NOTIFY_ON_EXIT_INSTRUCTIONS] : []),
+      ...(info.nudgeEnabled ? ['', NUDGE_INSTRUCTIONS] : []),
     ].join('\n')
 
     return output

@@ -12,10 +12,35 @@ export function formatSessionInfo(session: PTYSessionInfo): string[] {
     `  Status: ${session.status}${timedOutInfo}${exitInfo}${exitSignal}`,
     `  PID: ${session.pid}${timeoutInfo}`,
     `  Lines: ${session.lineCount}`,
+    `  ${formatNudgeSummary(session)}`,
     `  Workdir: ${session.workdir}`,
     `  Created: ${session.createdAt}`,
     '',
   ]
+}
+
+export function formatNudgeSummary(session: PTYSessionInfo, now: number = Date.now()): string {
+  if (!session.nudgeEnabled) {
+    return 'Nudges: disabled'
+  }
+
+  const base =
+    session.nudgePolicy === 'recurring'
+      ? `recurring every ${session.nudgeIntervalSeconds ?? 'unknown'}s`
+      : `automatic step ${(session.nudgeAutomaticStep ?? 0) + 1}`
+  const state = session.nudgePaused ? `paused, preserving ${base}` : base
+  const oneShot =
+    session.nudgeOneShotDelaySeconds === undefined
+      ? ''
+      : ` | one-shot: ${session.nudgeOneShotDelaySeconds}s`
+  let next = 'none'
+  if (session.nudgeNextDueAt) {
+    const dueAt = new Date(session.nudgeNextDueAt).getTime()
+    const remainingSeconds = Math.ceil((dueAt - now) / 1000)
+    next =
+      remainingSeconds > 0 ? `${session.nudgeNextDueAt} (in ${remainingSeconds}s)` : 'due, waiting'
+  }
+  return `Nudges: ${state}${oneShot} | next: ${next}`
 }
 
 export function formatLine(line: string, lineNum: number, maxLength: number = 2000): string {

@@ -132,7 +132,19 @@ class WebSocketHandler {
         await checkWorkdirPermission(message.workdir)
       }
 
-      const sessionInfo = manager.spawn(message)
+      const sessionInfo = manager.spawn({
+        command: message.command,
+        args: message.args,
+        workdir: message.workdir,
+        env: message.env,
+        title: message.title,
+        description: message.description,
+        parentSessionId: message.parentSessionId,
+        parentAgent: message.parentAgent,
+        notifyOnExit: message.notifyOnExit,
+        timeoutSeconds: message.timeoutSeconds,
+        enableNudges: false,
+      })
       if (message.subscribe) {
         this.handleSubscribe(ws, { type: 'subscribe', sessionId: sessionInfo.id })
       }

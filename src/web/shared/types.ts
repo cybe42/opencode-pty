@@ -36,10 +36,11 @@ export interface WSMessageClientSessionList extends WSMessageClient {
   type: 'session_list'
 }
 
-export interface WSMessageClientSpawnSession extends WSMessageClient, SpawnOptions {
-  type: 'spawn'
-  subscribe?: boolean
-}
+export type WSMessageClientSpawnSession = WSMessageClient &
+  Omit<SpawnOptions, 'nudgeIntervalSeconds' | 'enableNudges'> & {
+    type: 'spawn'
+    subscribe?: boolean
+  }
 
 export interface WSMessageClientInput extends WSMessageClient {
   type: 'input'

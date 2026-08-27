@@ -158,6 +158,7 @@ describe('PTY Manager Integration', () => {
       expect(testSession.status).toBeDefined()
       expect(typeof testSession.pid).toBe('number')
       expect(testSession.lineCount).toBeGreaterThan(0)
+      expect(testSession.nudgeEnabled).toBe(false)
       expect(outputTotal).toContain('test')
     })
 

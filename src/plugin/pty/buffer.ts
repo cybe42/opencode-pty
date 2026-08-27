@@ -6,9 +6,17 @@ export interface SearchMatch {
   text: string
 }
 
+export interface RawBufferDelta {
+  data: string
+  endPosition: number
+  truncated: boolean
+}
+
 export class RingBuffer {
   private buffer: string = ''
   private maxSize: number
+  private startPosition: number = 0
+  private endPosition: number = 0
 
   constructor(maxSize: number = DEFAULT_MAX_BUFFER_SIZE) {
     this.maxSize = maxSize
@@ -16,8 +24,11 @@ export class RingBuffer {
 
   append(data: string): void {
     this.buffer += data
+    this.endPosition += data.length
     if (this.buffer.length > this.maxSize) {
+      const removedLength = this.buffer.length - this.maxSize
       this.buffer = this.buffer.slice(-this.maxSize)
+      this.startPosition += removedLength
     }
   }
 
@@ -40,6 +51,15 @@ export class RingBuffer {
 
   readRaw(): string {
     return this.buffer
+  }
+
+  readRawFrom(position: number): RawBufferDelta {
+    const boundedPosition = Math.min(Math.max(position, this.startPosition), this.endPosition)
+    return {
+      data: this.buffer.slice(boundedPosition - this.startPosition),
+      endPosition: this.endPosition,
+      truncated: position < this.startPosition,
+    }
   }
 
   search(pattern: RegExp): SearchMatch[] {
@@ -65,11 +85,16 @@ export class RingBuffer {
     return this.buffer.length
   }
 
+  get position(): number {
+    return this.endPosition
+  }
+
   flush(): void {
     // No-op in new implementation
   }
 
   clear(): void {
     this.buffer = ''
+    this.startPosition = this.endPosition
   }
 }

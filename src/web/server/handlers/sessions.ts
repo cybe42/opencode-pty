@@ -43,6 +43,7 @@ export async function createSession(req: Request) {
       workdir: body.workdir,
       timeoutSeconds: body.timeoutSeconds,
       parentSessionId: 'web-api',
+      enableNudges: false,
     })
     return new JsonResponse(session)
   } catch (error) {

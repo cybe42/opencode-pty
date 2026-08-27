@@ -1,0 +1,16 @@
+Controls automatic nudge notifications for a running PTY session without affecting the process.
+
+Every agent-owned PTY starts in automatic mode. Automatic nudges use the fallback cadence 30s, 1m, 2m, 4m, 8m, 15m, then every 30m. Use this tool when the command's output gives you better timing information or further automatic updates are unnecessary.
+
+Actions:
+- `next` with `seconds`: Schedule one nudge after the chosen delay. This temporarily overrides the preserved automatic or recurring policy. After delivery, the preserved policy resumes. In automatic mode, the delivered one-shot counts as the next nudge and advances the automatic cadence. It also works while paused, producing one nudge before returning to paused.
+- `every` with `seconds`: Select a recurring cadence and resume nudges. Any pending one-shot is cancelled.
+- `pause`: Stop future nudges while preserving the current automatic stage or recurring cadence. Any pending one-shot is cancelled. The PTY process keeps running.
+- `resume`: Resume the policy preserved by pause. To select a policy while resuming, use `automatic` or `every` instead.
+- `automatic`: Select automatic mode, reset its cadence to 1 minute, and resume nudges. Any pending one-shot is cancelled.
+
+`seconds` must be a positive integer no greater than 2147483 and is accepted only by `next` and `every`.
+
+Manual `pty_read` and `pty_write` calls postpone automatic nudges at their current cadence. They do not change recurring or one-shot timing. All manual reads and writes still advance the nudge output cursor, so later nudges contain only newer output.
+
+The result confirms the effective policy and next due time. Nudge delivery waits until the parent agent session is idle and never kills, pauses, or otherwise changes the PTY process.

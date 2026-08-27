@@ -2,8 +2,17 @@ import { describe, it, expect, beforeEach, mock, spyOn, afterAll } from 'bun:tes
 import { ptySpawn } from '../src/plugin/pty/tools/spawn.ts'
 import { ptyRead } from '../src/plugin/pty/tools/read.ts'
 import { ptyList } from '../src/plugin/pty/tools/list.ts'
+import { ptyNudge } from '../src/plugin/pty/tools/nudge.ts'
 import { RingBuffer } from '../src/plugin/pty/buffer.ts'
 import { manager } from '../src/plugin/pty/manager.ts'
+
+const EXPECTED_NUDGE_REMINDER = [
+  '<system_reminder>',
+  'Future `<pty_nudge>` messages mean this PTY is still running; they are not completion signals.',
+  'Use your judgment to inspect it with `pty_read`, manage future check-ins with `pty_nudge`, leave it running, or stop it.',
+  'Avoid sleep-and-`pty_read` polling loops; nudges can be used for future check-ins instead.',
+  '</system_reminder>',
+].join('\n')
 
 describe('PTY Tools', () => {
   afterAll(() => {
@@ -22,6 +31,12 @@ describe('PTY Tools', () => {
         notifyOnExit: opts.notifyOnExit ?? false,
         timeoutSeconds: opts.timeoutSeconds,
         timedOut: false,
+        nudgeEnabled: true,
+        nudgePolicy: opts.nudgeIntervalSeconds === undefined ? 'automatic' : 'recurring',
+        nudgePaused: false,
+        nudgeAutomaticStep: 0,
+        nudgeIntervalSeconds: opts.nudgeIntervalSeconds,
+        nudgeNextDueAt: new Date(Date.now() + 60_000).toISOString(),
         createdAt: new Date().toISOString(),
         lineCount: 0,
       }))
@@ -57,6 +72,7 @@ describe('PTY Tools', () => {
         title: undefined,
         notifyOnExit: undefined,
         timeoutSeconds: undefined,
+        nudgeIntervalSeconds: undefined,
       })
 
       expect(result).toContain('<pty_spawned>')
@@ -64,8 +80,14 @@ describe('PTY Tools', () => {
       expect(result).toContain('Command: echo hello')
       expect(result).toContain('NotifyOnExit: false')
       expect(result).toContain('TimeoutSeconds: none')
+      expect(result).toContain('Nudges: automatic step 1')
       expect(result).toContain('</pty_spawned>')
-      expect(result).not.toContain('<system_reminder>')
+      expect(result).toContain(
+        'Future `<pty_nudge>` messages mean this PTY is still running; they are not completion signals.'
+      )
+      expect(result).toContain('Use your judgment to inspect it with `pty_read`')
+      expect(result).toContain('Avoid sleep-and-`pty_read` polling loops')
+      expect(result.endsWith(EXPECTED_NUDGE_REMINDER)).toBe(true)
     })
 
     it('should spawn with all optional args', async () => {
@@ -88,6 +110,7 @@ describe('PTY Tools', () => {
         description: 'Running Node.js script',
         notifyOnExit: true,
         timeoutSeconds: 60,
+        nudgeIntervalSeconds: 15,
       }
 
       const result = await ptySpawn.execute(args, ctx)
@@ -103,6 +126,7 @@ describe('PTY Tools', () => {
         parentAgent: 'test-agent',
         notifyOnExit: true,
         timeoutSeconds: 60,
+        nudgeIntervalSeconds: 15,
       })
 
       expect(result).toContain('Title: My Node Session')
@@ -112,6 +136,7 @@ describe('PTY Tools', () => {
       expect(result).toContain('Status: running')
       expect(result).toContain('NotifyOnExit: true')
       expect(result).toContain('TimeoutSeconds: 60')
+      expect(result).toContain('Nudges: recurring every 15s')
       expect(result).toContain('<system_reminder>')
       expect(result).toContain(
         'Completion signal for this session is the future `<pty_exited>` message.'
@@ -123,6 +148,56 @@ describe('PTY Tools', () => {
         'Never use sleep plus `pty_read` loops to check completion for this session.'
       )
       expect(result).toContain('</system_reminder>')
+      expect(result).toContain(
+        'Future `<pty_nudge>` messages mean this PTY is still running; they are not completion signals.'
+      )
+    })
+  })
+
+  describe('ptyNudge', () => {
+    beforeEach(() => {
+      spyOn(manager, 'configureNudge').mockImplementation((id, action, seconds) => ({
+        id,
+        title: 'Test Session',
+        command: 'sleep',
+        args: ['60'],
+        workdir: '/tmp',
+        status: 'running',
+        notifyOnExit: false,
+        timedOut: false,
+        nudgeEnabled: true,
+        nudgePolicy: action === 'every' ? 'recurring' : 'automatic',
+        nudgePaused: action === 'pause',
+        nudgeAutomaticStep: 0,
+        nudgeIntervalSeconds: action === 'every' ? seconds : undefined,
+        nudgeNextDueAt:
+          action === 'pause'
+            ? undefined
+            : new Date(Date.now() + (seconds ?? 60) * 1000).toISOString(),
+        pid: 12345,
+        createdAt: new Date().toISOString(),
+        lineCount: 0,
+      }))
+    })
+
+    it('should set a recurring cadence', async () => {
+      const result = await ptyNudge.execute(
+        { id: 'test-session-id', action: 'every', seconds: 900 },
+        {} as never
+      )
+
+      expect(manager.configureNudge).toHaveBeenCalledWith('test-session-id', 'every', 900)
+      expect(result).toContain('<pty_nudge_config>')
+      expect(result).toContain('Nudges: recurring every 900s')
+      expect(result).toContain('</pty_nudge_config>')
+    })
+
+    it('should report an unknown session', async () => {
+      spyOn(manager, 'configureNudge').mockReturnValue(null)
+
+      expect(
+        ptyNudge.execute({ id: 'missing', action: 'pause', seconds: undefined }, {} as never)
+      ).rejects.toThrow("PTY session 'missing' not found")
     })
   })
 
@@ -398,6 +473,27 @@ describe('PTY Tools', () => {
       expect(buffer.readRaw()).toBe('ine3\nline4')
       expect(buffer.read()).toEqual(['ine3', 'line4'])
       expect(buffer.length).toBe(2)
+    })
+
+    it('should read raw deltas using a cumulative position', () => {
+      const buffer = new RingBuffer(10)
+      buffer.append('first')
+      const firstPosition = buffer.position
+      buffer.append('-second-part')
+
+      expect(buffer.readRawFrom(firstPosition)).toEqual({
+        data: 'econd-part',
+        endPosition: 17,
+        truncated: true,
+      })
+
+      const latestPosition = buffer.position
+      buffer.append('-new')
+      expect(buffer.readRawFrom(latestPosition)).toEqual({
+        data: '-new',
+        endPosition: 21,
+        truncated: false,
+      })
     })
   })
 })

@@ -55,11 +55,12 @@ opencode
 
 | Tool        | Description                                                                 |
 | ----------- | --------------------------------------------------------------------------- |
-| `pty_spawn` | Create a new PTY session (command, args, workdir, env, title, notifyOnExit, timeoutSeconds) |
+| `pty_spawn` | Create a PTY session with automatic nudges (command, args, workdir, env, title, notifyOnExit, timeoutSeconds, nudgeIntervalSeconds) |
 | `pty_write` | Send input to a PTY (text, escape sequences like `\x03` for Ctrl+C)         |
 | `pty_read`  | Read output buffer with pagination and optional regex filtering             |
 | `pty_list`  | List all PTY sessions with status, PID, line count                          |
 | `pty_kill`  | Terminate a PTY, optionally cleanup the buffer                              |
+| `pty_nudge` | Reschedule, recur, pause, resume, or restore automatic nudge notifications   |
 
 ## Slash Commands
 
@@ -180,6 +181,28 @@ pty_spawn: command="npm", args=["run", "dev"], title="Dev Server", timeoutSecond
 pty_read: id="pty_a1b2c3d4", limit=50
 → Shows last 50 lines of output
 ```
+
+### Control automatic nudges
+
+Agent-owned PTYs automatically nudge after 30 seconds, 1, 2, 4, 8, and 15 minutes, then every 30 minutes. The agent can override that schedule without stopping the process:
+
+```
+pty_nudge: id="pty_a1b2c3d4", action="next", seconds=1200
+→ Schedules one nudge in 20 minutes, then resumes automatic mode
+
+pty_nudge: id="pty_a1b2c3d4", action="every", seconds=1800
+→ Selects a recurring 30-minute cadence
+
+pty_nudge: id="pty_a1b2c3d4", action="pause"
+→ Pauses nudges while preserving the current policy
+
+pty_nudge: id="pty_a1b2c3d4", action="resume"
+→ Restores the preserved policy
+```
+
+Nudges wait until the parent agent session is idle, report the new line count and bounded last new line since the previous nudge or manual read/write, and never affect the PTY process. Use `pty_read` when fuller output is useful.
+
+Run `/stopnudges` while the chat is idle to pause nudges for all running PTYs owned by that chat without stopping the processes.
 
 ### Filter for errors
 

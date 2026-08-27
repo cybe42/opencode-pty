@@ -1,7 +1,11 @@
 import { spawn, type IPty } from 'bun-pty'
 import { RingBuffer } from './buffer.ts'
 import type { PTYSession, PTYSessionInfo, SpawnOptions } from './types.ts'
-import { DEFAULT_TERMINAL_COLS, DEFAULT_TERMINAL_ROWS } from '../constants.ts'
+import {
+  DEFAULT_TERMINAL_COLS,
+  DEFAULT_TERMINAL_ROWS,
+  MAX_TIMER_DELAY_SECONDS,
+} from '../constants.ts'
 
 const SESSION_ID_BYTE_LENGTH = 4
 
@@ -16,16 +20,16 @@ export class SessionLifecycleManager {
   private sessions: Map<string, PTYSession> = new Map()
   private sessionTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map()
 
-  private normalizeTimeoutSeconds(timeoutSeconds: number | undefined): number | undefined {
-    if (timeoutSeconds === undefined) {
+  private normalizeSeconds(value: number | undefined, name: string): number | undefined {
+    if (value === undefined) {
       return undefined
     }
 
-    if (!Number.isInteger(timeoutSeconds) || timeoutSeconds <= 0) {
-      throw new Error('timeoutSeconds must be a positive integer in seconds')
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`${name} must be a positive integer in seconds`)
     }
 
-    return timeoutSeconds
+    return value
   }
 
   private clearSessionTimeout(id: string): void {
@@ -71,7 +75,14 @@ export class SessionLifecycleManager {
     const id = generateId()
     const args = opts.args ?? []
     const workdir = opts.workdir ?? process.cwd()
-    const timeoutSeconds = this.normalizeTimeoutSeconds(opts.timeoutSeconds)
+    const timeoutSeconds = this.normalizeSeconds(opts.timeoutSeconds, 'timeoutSeconds')
+    const nudgeIntervalSeconds = this.normalizeSeconds(
+      opts.nudgeIntervalSeconds,
+      'nudgeIntervalSeconds'
+    )
+    if (nudgeIntervalSeconds !== undefined && nudgeIntervalSeconds > MAX_TIMER_DELAY_SECONDS) {
+      throw new Error(`nudgeIntervalSeconds must not exceed ${MAX_TIMER_DELAY_SECONDS} seconds`)
+    }
     const title =
       opts.title ?? (`${opts.command} ${args.join(' ')}`.trim() || `Terminal ${id.slice(-4)}`)
 
@@ -92,6 +103,15 @@ export class SessionLifecycleManager {
       notifyOnExit: opts.notifyOnExit ?? false,
       timeoutSeconds,
       timedOut: false,
+      nudgeEnabled: opts.enableNudges ?? true,
+      nudgePolicy: nudgeIntervalSeconds === undefined ? 'automatic' : 'recurring',
+      nudgePaused: false,
+      nudgeAutomaticStep: 0,
+      nudgeIntervalSeconds,
+      nudgeOneShotDelaySeconds: undefined,
+      nudgeNextDueAt: undefined,
+      nudgeLastOutputPosition: 0,
+      nudgeGeneration: 0,
       buffer,
       process: null, // will be set
     }
@@ -117,6 +137,7 @@ export class SessionLifecycleManager {
   ): void {
     session.process?.onData((data: string) => {
       session.buffer.append(data)
+      session.lastOutputAt = Date.now()
       onData(session, data)
     })
 
@@ -213,10 +234,24 @@ export class SessionLifecycleManager {
       notifyOnExit: session.notifyOnExit,
       timeoutSeconds: session.timeoutSeconds,
       timedOut: session.timedOut,
+      nudgeEnabled: session.nudgeEnabled,
+      nudgePolicy: session.nudgePolicy,
+      nudgePaused: session.nudgePaused,
+      nudgeAutomaticStep: session.nudgeAutomaticStep,
+      nudgeIntervalSeconds: session.nudgeIntervalSeconds,
+      nudgeOneShotDelaySeconds: session.nudgeOneShotDelaySeconds,
+      nudgeNextDueAt:
+        session.nudgeNextDueAt === undefined
+          ? undefined
+          : new Date(session.nudgeNextDueAt).toISOString(),
       exitCode: session.exitCode,
       exitSignal: session.exitSignal,
       pid: session.pid,
       createdAt: session.createdAt.toISOString(),
+      lastOutputAt:
+        session.lastOutputAt === undefined
+          ? undefined
+          : new Date(session.lastOutputAt).toISOString(),
       lineCount: session.buffer.length,
     }
   }
